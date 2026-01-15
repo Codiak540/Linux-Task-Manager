@@ -69,7 +69,7 @@ void TaskManager::run() {
             if (!paused) {
                 g_idle_add(refresh_data, this);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
     });
 
@@ -92,8 +92,30 @@ void TaskManager::setup_processes_tab() {
         G_TYPE_STRING    // State
     );
 
-    processes_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(processes_tab.store));
+    // Create filter model
+    processes_tab.filter = GTK_TREE_MODEL_FILTER(gtk_tree_model_filter_new(GTK_TREE_MODEL(processes_tab.store), nullptr));
+    gtk_tree_model_filter_set_visible_func(processes_tab.filter,
+        [](GtkTreeModel* model, GtkTreeIter* iter, gpointer data) -> gboolean {
+            auto* self = static_cast<TaskManager*>(data);
+            if (self->current_search_query.empty()) return TRUE;
+
+            gchar* name = nullptr;
+            gtk_tree_model_get(model, iter, 1, &name, -1);
+            if (!name) return FALSE;
+
+            std::string name_lower = name;
+            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            std::string search_lower = self->current_search_query;
+            std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+
+            bool visible = name_lower.find(search_lower) != std::string::npos;
+            g_free(name);
+            return visible;
+        }, this, nullptr);
+
+    processes_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(processes_tab.filter));
     g_object_unref(processes_tab.store);
+    g_object_unref(processes_tab.filter);
 
     const char* headers[] = {"PID", "Name", "CPU%", "Mem%", "Memory (MB)", "Threads", "User", "State"};
     for (int i = 0; i < 8; i++) {
@@ -236,7 +258,12 @@ gboolean TaskManager::refresh_data(gpointer data) {
     self->refresh_processes();
     self->refresh_services();
     self->refresh_startup();
-    self->refresh_performance();
+
+    // Only refresh performance every 2nd cycle to save CPU
+    static int perf_counter = 0;
+    if (perf_counter++ % 2 == 0) {
+        self->refresh_performance();
+    }
     return FALSE;
 }
 
@@ -266,8 +293,9 @@ void TaskManager::refresh_processes() {
 
         processes_tab.processes = new_procs;
 
-        // Build map of old PIDs
+        // Build map of old PIDs and their iters
         std::map<pid_t, GtkTreeIter> old_pids;
+        std::vector<pid_t> pids_to_remove;
         GtkTreeIter iter;
         if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(processes_tab.store), &iter)) {
             do {
@@ -283,44 +311,56 @@ void TaskManager::refresh_processes() {
             new_pids.insert(proc.pid);
         }
 
-        // Remove processes that no longer exist
-        auto it = old_pids.begin();
-        while (it != old_pids.end()) {
-            if (new_pids.find(it->first) == new_pids.end()) {
-                gtk_list_store_remove(processes_tab.store, &it->second);
-                it = old_pids.erase(it);
-            } else {
-                ++it;
+        // Mark processes for removal (do it after iteration)
+        for (const auto& pair : old_pids) {
+            if (new_pids.find(pair.first) == new_pids.end()) {
+                pids_to_remove.push_back(pair.first);
             }
         }
 
-        // Update existing processes and add new ones
+        // Remove dead processes
+        for (pid_t dead_pid : pids_to_remove) {
+            gtk_list_store_remove(processes_tab.store, &old_pids[dead_pid]);
+            old_pids.erase(dead_pid);
+        }
+
+        // Pre-compute search filter once
         std::string search_lower = current_search_query;
         std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+        bool has_search = !current_search_query.empty();
 
+        // Create map of new procs by PID for O(1) lookup
+        std::map<pid_t, const ProcessInfo*> new_proc_map;
         for (const auto& proc : new_procs) {
-            std::string name_lower = proc.name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            new_proc_map[proc.pid] = &proc;
+        }
 
-            bool matches_search = current_search_query.empty() || name_lower.find(search_lower) != std::string::npos;
+        // Update existing processes
+        for (auto& pair : old_pids) {
+            pid_t pid = pair.first;
+            if (new_proc_map.find(pid) != new_proc_map.end()) {
+                const ProcessInfo* proc = new_proc_map[pid];
+                std::string name_lower = proc->name;
+                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+                bool matches_search = !has_search || name_lower.find(search_lower) != std::string::npos;
 
-            if (old_pids.find(proc.pid) != old_pids.end()) {
-                // Update existing row
-                GtkTreeIter& existing_iter = old_pids[proc.pid];
-                if (matches_search) {
-                    gtk_list_store_set(processes_tab.store, &existing_iter,
-                        0, proc.pid,
-                        1, proc.name.c_str(),
-                        2, proc.cpu_usage,
-                        3, proc.memory_usage,
-                        4, proc.memory_rss / (1024 * 1024),
-                        5, proc.thread_count,
-                        6, proc.user.c_str(),
-                        7, proc.state.c_str(),
-                        -1);
-                }
-            } else if (matches_search) {
-                // Add new row
+                // Always update - we'll hide via tree view filter if needed
+                gtk_list_store_set(processes_tab.store, &pair.second,
+                    0, proc->pid,
+                    1, proc->name.c_str(),
+                    2, proc->cpu_usage,
+                    3, proc->memory_usage,
+                    4, proc->memory_rss / (1024 * 1024),
+                    5, proc->thread_count,
+                    6, proc->user.c_str(),
+                    7, proc->state.c_str(),
+                    -1);
+            }
+        }
+
+        // Add new processes (no search filter on add)
+        for (const auto& proc : new_procs) {
+            if (old_pids.find(proc.pid) == old_pids.end()) {
                 GtkTreeIter new_iter;
                 gtk_list_store_append(processes_tab.store, &new_iter);
                 gtk_list_store_set(processes_tab.store, &new_iter,
@@ -753,7 +793,9 @@ void TaskManager::on_search_changed(GtkSearchEntry* entry, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
     const char* query = gtk_entry_get_text(GTK_ENTRY(entry));
     self->current_search_query = (query ? query : "");
-    self->refresh_processes();
+
+    // Reapply filter
+    gtk_tree_model_filter_refilter(self->processes_tab.filter);
 }
 
 void TaskManager::on_pause_toggled(GtkToggleButton* button, gpointer data) {

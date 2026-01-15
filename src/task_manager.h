@@ -15,6 +15,7 @@
 struct TabState {
     GtkWidget* treeview = nullptr;
     GtkListStore* store = nullptr;
+    GtkTreeModelFilter* filter = nullptr;
     std::vector<ProcessInfo> processes;
     GtkTreeViewColumn* sort_column = nullptr;
     GtkSortType sort_order = GTK_SORT_ASCENDING;
