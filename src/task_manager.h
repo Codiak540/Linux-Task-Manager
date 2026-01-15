@@ -93,8 +93,8 @@ private:
     void setup_startup_tab();
     void setup_performance_tab();
     void refresh_processes();
-    void refresh_services();
-    void refresh_startup();
+    void refresh_services() const;
+    void refresh_startup() const;
     void refresh_performance();
 
     // Helper methods for scroll preservation

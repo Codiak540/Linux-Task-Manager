@@ -6,6 +6,12 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
+#define MAX_NET 100.0
+
+const char* headers[] = {"PID", "Name", "CPU%", "Mem%", "Memory (MB)", "Threads", "User", "State"};
+const char* headers2[] = {"Name", "Description", "State", "Active", "PID"};
+const char* headers3[] = {"Name", "Enabled", "Source", "Path"};
+
 TaskManager::TaskManager() : running(true), paused(false) {
     last_refresh_time = std::chrono::steady_clock::now();
 }
@@ -92,7 +98,6 @@ void TaskManager::setup_processes_tab() {
         G_TYPE_STRING    // State
     );
 
-    // Create filter model
     processes_tab.filter = GTK_TREE_MODEL_FILTER(gtk_tree_model_filter_new(GTK_TREE_MODEL(processes_tab.store), nullptr));
     gtk_tree_model_filter_set_visible_func(processes_tab.filter,
         [](GtkTreeModel* model, GtkTreeIter* iter, gpointer data) -> gboolean {
@@ -103,12 +108,7 @@ void TaskManager::setup_processes_tab() {
             gtk_tree_model_get(model, iter, 1, &name, -1);
             if (!name) return FALSE;
 
-            std::string name_lower = name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-            std::string search_lower = self->current_search_query;
-            std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
-
-            bool visible = name_lower.find(search_lower) != std::string::npos;
+            bool visible = strcasestr(name, self->current_search_query.c_str()) != nullptr;
             g_free(name);
             return visible;
         }, this, nullptr);
@@ -117,7 +117,6 @@ void TaskManager::setup_processes_tab() {
     g_object_unref(processes_tab.store);
     g_object_unref(processes_tab.filter);
 
-    const char* headers[] = {"PID", "Name", "CPU%", "Mem%", "Memory (MB)", "Threads", "User", "State"};
     for (int i = 0; i < 8; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
@@ -146,11 +145,10 @@ void TaskManager::setup_services_tab() {
     services_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(services_tab.store));
     g_object_unref(services_tab.store);
 
-    const char* headers[] = {"Name", "Description", "State", "Active", "PID"};
     for (int i = 0; i < 5; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
-            headers[i], renderer, "text", i, nullptr);
+            headers2[i], renderer, "text", i, nullptr);
         gtk_tree_view_column_set_resizable(column, TRUE);
         gtk_tree_view_append_column(GTK_TREE_VIEW(services_tab.treeview), column);
     }
@@ -174,11 +172,10 @@ void TaskManager::setup_startup_tab() {
     startup_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(startup_tab.store));
     g_object_unref(startup_tab.store);
 
-    const char* headers[] = {"Name", "Enabled", "Source", "Path"};
     for (int i = 0; i < 4; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
-            headers[i], renderer, "text", i, nullptr);
+            headers3[i], renderer, "text", i, nullptr);
         gtk_tree_view_column_set_resizable(column, TRUE);
         gtk_tree_view_append_column(GTK_TREE_VIEW(startup_tab.treeview), column);
     }
@@ -199,11 +196,10 @@ void TaskManager::setup_performance_tab() {
     gtk_label_set_markup(GTK_LABEL(cpu_title), "<b>CPU Usage</b>");
     gtk_box_pack_start(GTK_BOX(vbox), cpu_title, FALSE, FALSE, 0);
 
-    GtkWidget* cpu_drawing = gtk_drawing_area_new();
-    gtk_widget_set_size_request(cpu_drawing, -1, 80);
-    gtk_box_pack_start(GTK_BOX(vbox), cpu_drawing, FALSE, FALSE, 0);
-    g_signal_connect(cpu_drawing, "draw", G_CALLBACK(on_perf_draw), this);
-    cpu_drawing_area = GTK_DRAWING_AREA(cpu_drawing);
+    cpu_drawing_area = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    gtk_widget_set_size_request(GTK_WIDGET(cpu_drawing_area), -1, 80);
+    gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(cpu_drawing_area), FALSE, FALSE, 0);
+    g_signal_connect(cpu_drawing_area, "draw", G_CALLBACK(on_perf_draw), this);
 
     cpu_label = GTK_LABEL(gtk_label_new("CPU: 0.0%"));
     gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(cpu_label), FALSE, FALSE, 0);
@@ -212,11 +208,10 @@ void TaskManager::setup_performance_tab() {
     gtk_label_set_markup(GTK_LABEL(mem_title), "<b>Memory Usage</b>");
     gtk_box_pack_start(GTK_BOX(vbox), mem_title, FALSE, FALSE, 0);
 
-    GtkWidget* mem_drawing = gtk_drawing_area_new();
-    gtk_widget_set_size_request(mem_drawing, -1, 80);
-    gtk_box_pack_start(GTK_BOX(vbox), mem_drawing, FALSE, FALSE, 0);
-    g_signal_connect(mem_drawing, "draw", G_CALLBACK(on_mem_draw), this);
-    mem_drawing_area = GTK_DRAWING_AREA(mem_drawing);
+    mem_drawing_area = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    gtk_widget_set_size_request(GTK_WIDGET(mem_drawing_area), -1, 80);
+    gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(mem_drawing_area), FALSE, FALSE, 0);
+    g_signal_connect(mem_drawing_area, "draw", G_CALLBACK(on_mem_draw), this);
 
     mem_label = GTK_LABEL(gtk_label_new("Memory: 0 MB / 0 MB (0.0%)"));
     gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(mem_label), FALSE, FALSE, 0);
@@ -225,11 +220,10 @@ void TaskManager::setup_performance_tab() {
     gtk_label_set_markup(GTK_LABEL(net_title), "<b>Network I/O</b>");
     gtk_box_pack_start(GTK_BOX(vbox), net_title, FALSE, FALSE, 0);
 
-    GtkWidget* net_drawing = gtk_drawing_area_new();
-    gtk_widget_set_size_request(net_drawing, -1, 80);
-    gtk_box_pack_start(GTK_BOX(vbox), net_drawing, FALSE, FALSE, 0);
-    g_signal_connect(net_drawing, "draw", G_CALLBACK(on_net_draw), this);
-    net_drawing_area = GTK_DRAWING_AREA(net_drawing);
+    net_drawing_area = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    gtk_widget_set_size_request(GTK_WIDGET(net_drawing_area), -1, 80);
+    gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(net_drawing_area), FALSE, FALSE, 0);
+    g_signal_connect(net_drawing_area, "draw", G_CALLBACK(on_net_draw), this);
 
     net_label = GTK_LABEL(gtk_label_new("Network: 0 Mbps"));
     gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(net_label), FALSE, FALSE, 0);
@@ -238,11 +232,10 @@ void TaskManager::setup_performance_tab() {
     gtk_label_set_markup(GTK_LABEL(gpu_title), "<b>GPU Usage</b>");
     gtk_box_pack_start(GTK_BOX(vbox), gpu_title, FALSE, FALSE, 0);
 
-    GtkWidget* gpu_drawing = gtk_drawing_area_new();
-    gtk_widget_set_size_request(gpu_drawing, -1, 80);
-    gtk_box_pack_start(GTK_BOX(vbox), gpu_drawing, FALSE, FALSE, 0);
-    g_signal_connect(gpu_drawing, "draw", G_CALLBACK(on_gpu_draw), this);
-    gpu_drawing_area = GTK_DRAWING_AREA(gpu_drawing);
+    gpu_drawing_area = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    gtk_widget_set_size_request(GTK_WIDGET(gpu_drawing_area), -1, 80);
+    gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(gpu_drawing_area), FALSE, FALSE, 0);
+    g_signal_connect(gpu_drawing_area, "draw", G_CALLBACK(on_gpu_draw), this);
 
     gpu_label = GTK_LABEL(gtk_label_new("GPU: 0.0%"));
     gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(gpu_label), FALSE, FALSE, 0);
@@ -259,7 +252,6 @@ gboolean TaskManager::refresh_data(gpointer data) {
     self->refresh_services();
     self->refresh_startup();
 
-    // Only refresh performance every 2nd cycle to save CPU
     static int perf_counter = 0;
     if (perf_counter++ % 2 == 0) {
         self->refresh_performance();
@@ -274,28 +266,41 @@ void TaskManager::refresh_processes() {
         auto now = std::chrono::steady_clock::now();
         double time_diff_secs = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_refresh_time).count();
         last_refresh_time = now;
+
         long ticks_per_second = sysconf(_SC_CLK_TCK);
+        int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+        if (num_cpus <= 0) num_cpus = 1;
 
         SystemStats stats = ProcParser::get_system_stats();
+
+        // FIXED: Use total_memory instead of available_memory for correct percentage
+        uint64_t total_mem = stats.total_memory;
+        if (total_mem == 0) total_mem = 1; // Prevent division by zero
+
         for (auto& proc : new_procs) {
-            if (last_cpu_times.count(proc.pid) && time_diff_secs > 0) {
+            // CPU usage calculation: (cpu_time_delta / ticks_per_sec / time_delta) * 100 / num_cpus
+            if (last_cpu_times.count(proc.pid) && time_diff_secs > 0.001) {
                 long cpu_diff = proc.cpu_time - last_cpu_times[proc.pid];
-                proc.cpu_usage = std::max(0.0, (double)cpu_diff * 100.0 / (double)ticks_per_second / time_diff_secs);
+                if (cpu_diff > 0) {
+                    // Convert jiffies to seconds, then to percentage per core
+                    proc.cpu_usage = (static_cast<double>(cpu_diff) / static_cast<double>(ticks_per_second))
+                                   / time_diff_secs * 100.0 / static_cast<double>(num_cpus);
+                } else {
+                    proc.cpu_usage = 0.0;
+                }
             } else {
                 proc.cpu_usage = 0.0;
             }
             last_cpu_times[proc.pid] = proc.cpu_time;
 
-            if (stats.total_memory > 0) {
-                proc.memory_usage = (proc.memory_rss * 100.0) / stats.total_memory;
-            }
+            // FIXED: Correct memory percentage calculation
+            proc.memory_usage = (static_cast<double>(proc.memory_rss) / static_cast<double>(total_mem)) * 100.0;
         }
 
-        processes_tab.processes = new_procs;
+        processes_tab.processes = std::move(new_procs);
 
-        // Build map of old PIDs and their iters
+        // Build map of old PIDs
         std::map<pid_t, GtkTreeIter> old_pids;
-        std::vector<pid_t> pids_to_remove;
         GtkTreeIter iter;
         if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(processes_tab.store), &iter)) {
             do {
@@ -307,44 +312,31 @@ void TaskManager::refresh_processes() {
 
         // Build set of new PIDs
         std::set<pid_t> new_pids;
-        for (const auto& proc : new_procs) {
+        for (const auto& proc : processes_tab.processes) {
             new_pids.insert(proc.pid);
         }
 
-        // Mark processes for removal (do it after iteration)
-        for (const auto& pair : old_pids) {
-            if (new_pids.find(pair.first) == new_pids.end()) {
-                pids_to_remove.push_back(pair.first);
+        // Remove dead processes
+        for (auto it = old_pids.begin(); it != old_pids.end(); ) {
+            if (new_pids.find(it->first) == new_pids.end()) {
+                gtk_list_store_remove(processes_tab.store, &it->second);
+                it = old_pids.erase(it);
+            } else {
+                ++it;
             }
         }
 
-        // Remove dead processes
-        for (pid_t dead_pid : pids_to_remove) {
-            gtk_list_store_remove(processes_tab.store, &old_pids[dead_pid]);
-            old_pids.erase(dead_pid);
-        }
-
-        // Pre-compute search filter once
-        std::string search_lower = current_search_query;
-        std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
-        bool has_search = !current_search_query.empty();
-
         // Create map of new procs by PID for O(1) lookup
         std::map<pid_t, const ProcessInfo*> new_proc_map;
-        for (const auto& proc : new_procs) {
+        for (const auto& proc : processes_tab.processes) {
             new_proc_map[proc.pid] = &proc;
         }
 
         // Update existing processes
         for (auto& pair : old_pids) {
             pid_t pid = pair.first;
-            if (new_proc_map.find(pid) != new_proc_map.end()) {
+            if (new_proc_map.count(pid)) {
                 const ProcessInfo* proc = new_proc_map[pid];
-                std::string name_lower = proc->name;
-                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-                bool matches_search = !has_search || name_lower.find(search_lower) != std::string::npos;
-
-                // Always update - we'll hide via tree view filter if needed
                 gtk_list_store_set(processes_tab.store, &pair.second,
                     0, proc->pid,
                     1, proc->name.c_str(),
@@ -358,9 +350,9 @@ void TaskManager::refresh_processes() {
             }
         }
 
-        // Add new processes (no search filter on add)
-        for (const auto& proc : new_procs) {
-            if (old_pids.find(proc.pid) == old_pids.end()) {
+        // Add new processes
+        for (const auto& proc : processes_tab.processes) {
+            if (!old_pids.count(proc.pid)) {
                 GtkTreeIter new_iter;
                 gtk_list_store_append(processes_tab.store, &new_iter);
                 gtk_list_store_set(processes_tab.store, &new_iter,
@@ -381,13 +373,12 @@ void TaskManager::refresh_processes() {
     }
 }
 
-void TaskManager::refresh_services() {
+void TaskManager::refresh_services() const {
     try {
-        auto new_services = systemd_mgr.get_all_services();
+        auto new_services = SystemdManager::get_all_services();
 
         DEBUG_ACTION(std::cerr << "DEBUG: Found " << new_services.size() << " services" << std::endl);
 
-        // Build map of old service names
         std::map<std::string, GtkTreeIter> old_services;
         GtkTreeIter iter;
         if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(services_tab.store), &iter)) {
@@ -401,16 +392,13 @@ void TaskManager::refresh_services() {
             } while (gtk_tree_model_iter_next(GTK_TREE_MODEL(services_tab.store), &iter));
         }
 
-        // Build set of new service names
         std::set<std::string> new_service_names;
         for (const auto& svc : new_services) {
             new_service_names.insert(svc.name);
         }
 
-        // Remove services that no longer exist
-        auto it = old_services.begin();
-        while (it != old_services.end()) {
-            if (new_service_names.find(it->first) == new_service_names.end()) {
+        for (auto it = old_services.begin(); it != old_services.end(); ) {
+            if (!new_service_names.count(it->first)) {
                 gtk_list_store_remove(services_tab.store, &it->second);
                 it = old_services.erase(it);
             } else {
@@ -418,21 +406,17 @@ void TaskManager::refresh_services() {
             }
         }
 
-        // Update existing services and add new ones
         for (const auto& svc : new_services) {
-            if (old_services.find(svc.name) != old_services.end()) {
-                // Update existing row
-                GtkTreeIter& existing_iter = old_services[svc.name];
-                gtk_list_store_set(services_tab.store, &existing_iter,
+            auto it = old_services.find(svc.name);
+            if (it != old_services.end()) {
+                gtk_list_store_set(services_tab.store, &it->second,
                     0, svc.name.c_str(),
                     1, svc.description.c_str(),
                     2, svc.state.c_str(),
                     3, svc.active.c_str(),
                     4, static_cast<gint>(svc.main_pid),
                     -1);
-                DEBUG_ACTION(std::cerr << "DEBUG: Updated service " << svc.name << std::endl);
             } else {
-                // Add new row
                 GtkTreeIter new_iter;
                 gtk_list_store_append(services_tab.store, &new_iter);
                 gtk_list_store_set(services_tab.store, &new_iter,
@@ -442,7 +426,6 @@ void TaskManager::refresh_services() {
                     3, svc.active.c_str(),
                     4, static_cast<gint>(svc.main_pid),
                     -1);
-                DEBUG_ACTION(std::cerr << "DEBUG: Added service " << svc.name << std::endl);
             }
         }
     } catch (const std::exception& e) {
@@ -450,11 +433,10 @@ void TaskManager::refresh_services() {
     }
 }
 
-void TaskManager::refresh_startup() {
+void TaskManager::refresh_startup() const {
     try {
-        auto new_startups = systemd_mgr.get_startup_entries();
+        auto new_startups = SystemdManager::get_startup_entries();
 
-        // Build map of old startup entries by path
         std::map<std::string, GtkTreeIter> old_startups;
         GtkTreeIter iter;
         if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(startup_tab.store), &iter)) {
@@ -468,16 +450,13 @@ void TaskManager::refresh_startup() {
             } while (gtk_tree_model_iter_next(GTK_TREE_MODEL(startup_tab.store), &iter));
         }
 
-        // Build set of new startup paths
         std::set<std::string> new_startup_paths;
         for (const auto& entry : new_startups) {
             new_startup_paths.insert(entry.path);
         }
 
-        // Remove startups that no longer exist
-        auto it = old_startups.begin();
-        while (it != old_startups.end()) {
-            if (new_startup_paths.find(it->first) == new_startup_paths.end()) {
+        for (auto it = old_startups.begin(); it != old_startups.end(); ) {
+            if (!new_startup_paths.count(it->first)) {
                 gtk_list_store_remove(startup_tab.store, &it->second);
                 it = old_startups.erase(it);
             } else {
@@ -485,19 +464,16 @@ void TaskManager::refresh_startup() {
             }
         }
 
-        // Update existing and add new startups
         for (const auto& entry : new_startups) {
-            if (old_startups.find(entry.path) != old_startups.end()) {
-                // Update existing row
-                GtkTreeIter& existing_iter = old_startups[entry.path];
-                gtk_list_store_set(startup_tab.store, &existing_iter,
+            auto it = old_startups.find(entry.path);
+            if (it != old_startups.end()) {
+                gtk_list_store_set(startup_tab.store, &it->second,
                     0, entry.name.c_str(),
                     1, entry.enabled,
                     2, entry.source.c_str(),
                     3, entry.path.c_str(),
                     -1);
             } else {
-                // Add new row
                 GtkTreeIter new_iter;
                 gtk_list_store_append(startup_tab.store, &new_iter);
                 gtk_list_store_set(startup_tab.store, &new_iter,
@@ -555,12 +531,12 @@ void TaskManager::refresh_performance() {
     if (gpu_drawing_area) gtk_widget_queue_draw(GTK_WIDGET(gpu_drawing_area));
 }
 
-gboolean TaskManager::on_perf_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
-    auto* self = static_cast<TaskManager*>(data);
+static inline void draw_graph(GtkWidget* widget, cairo_t* cr, const std::vector<double>& history,
+                               double max_val, double r, double g, double b) {
     GtkAllocation alloc;
     gtk_widget_get_allocation(widget, &alloc);
 
-    if (alloc.width <= 1 || alloc.height <= 1) return FALSE;
+    if (alloc.width <= 1 || alloc.height <= 1) return;
 
     cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
     cairo_rectangle(cr, 0, 0, alloc.width, alloc.height);
@@ -575,27 +551,19 @@ gboolean TaskManager::on_perf_draw(GtkWidget* widget, cairo_t* cr, gpointer data
     }
     cairo_stroke(cr);
 
-    cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
-    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, 10);
-    cairo_move_to(cr, 5, alloc.height - 5);
-    cairo_show_text(cr, "0%");
-    cairo_move_to(cr, 5, 10);
-    cairo_show_text(cr, "100%");
-
-    if (self->perf_data.cpu_history.size() > 1) {
-        cairo_set_source_rgb(cr, 0.0, 1.0, 0.0);
+    if (history.size() > 1) {
+        cairo_set_source_rgb(cr, r, g, b);
         cairo_set_line_width(cr, 2.0);
         cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
         cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
 
-        double x_step = (static_cast<double>(alloc.width) / (self->perf_data.max_history - 1));
+        double x_step = static_cast<double>(alloc.width) / (history.size() - 1);
 
-        for (size_t i = 0; i < self->perf_data.cpu_history.size(); i++) {
+        for (size_t i = 0; i < history.size(); i++) {
             double x = i * x_step;
-            double cpu_val = self->perf_data.cpu_history[i];
-            if (cpu_val > 100) cpu_val = 100;
-            double y = alloc.height - (cpu_val / 100.0 * alloc.height);
+            double val = history[i];
+            if (val > max_val) val = max_val;
+            double y = alloc.height - (val / max_val * alloc.height);
 
             if (i == 0) {
                 cairo_move_to(cr, x, y);
@@ -605,146 +573,29 @@ gboolean TaskManager::on_perf_draw(GtkWidget* widget, cairo_t* cr, gpointer data
         }
         cairo_stroke(cr);
     }
+}
 
+gboolean TaskManager::on_perf_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+    draw_graph(widget, cr, self->perf_data.cpu_history, 100.0, 0.0, 1.0, 0.0);
     return FALSE;
 }
 
 gboolean TaskManager::on_mem_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(widget, &alloc);
-
-    if (alloc.width <= 1 || alloc.height <= 1) return FALSE;
-
-    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
-    cairo_rectangle(cr, 0, 0, alloc.width, alloc.height);
-    cairo_fill(cr);
-
-    cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
-    cairo_set_line_width(cr, 1.0);
-    for (int i = 0; i <= 4; i++) {
-        double y = static_cast<double>(alloc.height / 4) * i;
-        cairo_move_to(cr, 0, y);
-        cairo_line_to(cr, alloc.width, y);
-    }
-    cairo_stroke(cr);
-
-    if (self->perf_data.mem_history.size() > 1) {
-        cairo_set_source_rgb(cr, 0.2, 0.8, 1.0);
-        cairo_set_line_width(cr, 2.0);
-        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-
-        double x_step = static_cast<double>(alloc.width) / (self->perf_data.max_history - 1);
-
-        for (size_t i = 0; i < self->perf_data.mem_history.size(); i++) {
-            double x = i * x_step;
-            double mem_val = self->perf_data.mem_history[i];
-            if (mem_val > 100) mem_val = 100;
-            double y = alloc.height - (mem_val / 100.0 * alloc.height);
-
-            if (i == 0) {
-                cairo_move_to(cr, x, y);
-            } else {
-                cairo_line_to(cr, x, y);
-            }
-        }
-        cairo_stroke(cr);
-    }
-
+    draw_graph(widget, cr, self->perf_data.mem_history, 100.0, 0.2, 0.8, 1.0);
     return FALSE;
 }
 
 gboolean TaskManager::on_net_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(widget, &alloc);
-
-    if (alloc.width <= 1 || alloc.height <= 1) return FALSE;
-
-    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
-    cairo_rectangle(cr, 0, 0, alloc.width, alloc.height);
-    cairo_fill(cr);
-
-    cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
-    cairo_set_line_width(cr, 1.0);
-    for (int i = 0; i <= 4; i++) {
-        double y = static_cast<double>(alloc.height / 4) * i;
-        cairo_move_to(cr, 0, y);
-        cairo_line_to(cr, alloc.width, y);
-    }
-    cairo_stroke(cr);
-
-    if (self->perf_data.net_history.size() > 1) {
-        cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);
-        cairo_set_line_width(cr, 2.0);
-        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-
-        double x_step = static_cast<double>(alloc.width) / (self->perf_data.max_history - 1);
-        double max_net = 100.0;
-
-        for (size_t i = 0; i < self->perf_data.net_history.size(); i++) {
-            double x = i * x_step;
-            double net_val = self->perf_data.net_history[i];
-            if (net_val > max_net) net_val = max_net;
-            double y = alloc.height - (net_val / max_net * alloc.height);
-
-            if (i == 0) {
-                cairo_move_to(cr, x, y);
-            } else {
-                cairo_line_to(cr, x, y);
-            }
-        }
-        cairo_stroke(cr);
-    }
-
+    draw_graph(widget, cr, self->perf_data.net_history, MAX_NET, 1.0, 1.0, 0.0);
     return FALSE;
 }
 
 gboolean TaskManager::on_gpu_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(widget, &alloc);
-
-    if (alloc.width <= 1 || alloc.height <= 1) return FALSE;
-
-    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
-    cairo_rectangle(cr, 0, 0, alloc.width, alloc.height);
-    cairo_fill(cr);
-
-    cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
-    cairo_set_line_width(cr, 1.0);
-    for (int i = 0; i <= 4; i++) {
-        double y = static_cast<double>(alloc.height / 4) * i;
-        cairo_move_to(cr, 0, y);
-        cairo_line_to(cr, alloc.width, y);
-    }
-    cairo_stroke(cr);
-
-    if (self->perf_data.gpu_history.size() > 1) {
-        cairo_set_source_rgb(cr, 1.0, 0.5, 0.0);
-        cairo_set_line_width(cr, 2.0);
-        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-
-        double x_step = static_cast<double>(alloc.width) / (self->perf_data.max_history - 1);
-
-        for (size_t i = 0; i < self->perf_data.gpu_history.size(); i++) {
-            double x = i * x_step;
-            double gpu_val = self->perf_data.gpu_history[i];
-            if (gpu_val > 100) gpu_val = 100;
-            double y = alloc.height - (gpu_val / 100.0 * alloc.height);
-
-            if (i == 0) {
-                cairo_move_to(cr, x, y);
-            } else {
-                cairo_line_to(cr, x, y);
-            }
-        }
-        cairo_stroke(cr);
-    }
-
+    draw_graph(widget, cr, self->perf_data.gpu_history, 100.0, 1.0, 0.5, 0.0);
     return FALSE;
 }
 
@@ -794,7 +645,6 @@ void TaskManager::on_search_changed(GtkSearchEntry* entry, gpointer data) {
     const char* query = gtk_entry_get_text(GTK_ENTRY(entry));
     self->current_search_query = (query ? query : "");
 
-    // Reapply filter
     gtk_tree_model_filter_refilter(self->processes_tab.filter);
 }
 

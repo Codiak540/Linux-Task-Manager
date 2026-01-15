@@ -9,7 +9,7 @@
 
 bool check_existing_instance(const std::string& socket_path) {
     // Try to connect to existing socket
-    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    const int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         return false;
     }
@@ -18,7 +18,7 @@ bool check_existing_instance(const std::string& socket_path) {
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
-    int ret = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+    int ret = connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
     close(sock);
 
     if (ret == 0) {

@@ -55,6 +55,12 @@ ProcessInfo ProcParser::parse_process(pid_t pid) {
     info.pid = pid;
     info.is_elevated = (geteuid() == 0 && pid != getpid());
 
+    // Initialize memory to 0 to avoid garbage values
+    info.memory_rss = 0;
+    info.memory_vms = 0;
+    info.thread_count = 0;
+    info.user = "unknown";
+
     // Read /proc/[pid]/stat
     std::string stat_path = "/proc/" + std::to_string(pid) + "/stat";
     std::ifstream stat_file(stat_path);
@@ -94,17 +100,27 @@ ProcessInfo ProcParser::parse_process(pid_t pid) {
     std::string status_path = "/proc/" + std::to_string(pid) + "/status";
     std::ifstream status_file(status_path);
     if (status_file) {
-        std::string key, value_str;
+        std::string key, line_status;
         uint64_t value;
-        while (std::getline(status_file, line)) {
-            std::istringstream status_iss(line);
+
+        while (std::getline(status_file, line_status)) {
+            // Parse "Key:    Value    kB" format
+            std::istringstream status_iss(line_status);
             status_iss >> key >> value;
-            if (key == "VmRSS:") info.memory_rss = value * 1024;
-            else if (key == "VmSize:") info.memory_vms = value * 1024;
-            else if (key == "Threads:") info.thread_count = value;
-            else if (key == "Uid:") {
-                struct passwd* pwd = getpwuid(value);
-                if (pwd) info.user = pwd->pw_name;
+
+            if (key == "VmRSS:") {
+                // VmRSS is in kB, convert to bytes
+                info.memory_rss = value * 1024;
+            } else if (key == "VmSize:") {
+                // VmSize is in kB, convert to bytes
+                info.memory_vms = value * 1024;
+            } else if (key == "Threads:") {
+                info.thread_count = static_cast<int>(value);
+            } else if (key == "Uid:") {
+                struct passwd* pwd = getpwuid(static_cast<uid_t>(value));
+                if (pwd) {
+                    info.user = pwd->pw_name;
+                }
             }
         }
     }
