@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <map>
+#include <set>
 #include <chrono>
 #include "proc_parser.h"
 #include "systemd_manager.h"
@@ -41,6 +42,12 @@ public:
 private:
     GtkWidget* window = nullptr;
     GtkWidget* notebook = nullptr;
+
+    // Scrolled windows for preserving scroll position
+    GtkScrolledWindow* processes_scrolled = nullptr;
+    GtkScrolledWindow* services_scrolled = nullptr;
+    GtkScrolledWindow* startup_scrolled = nullptr;
+
     TabState processes_tab;
     TabState services_tab;
     TabState startup_tab;
@@ -88,6 +95,11 @@ private:
     void refresh_services();
     void refresh_startup();
     void refresh_performance();
+
+    // Helper methods for scroll preservation
+    void save_scroll_position(GtkScrolledWindow* scrolled, double& v_pos, double& h_pos);
+    void restore_scroll_position(GtkScrolledWindow* scrolled, double v_pos, double h_pos);
+
     static void update_treeview(const TabState& tab);
     static void apply_search_filter(const std::string& query, const TabState& tab);
 };
