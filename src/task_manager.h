@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <map>
+#include <chrono>
 #include "proc_parser.h"
 #include "systemd_manager.h"
 
@@ -61,6 +62,7 @@ private:
     SystemdManager systemd_mgr;
     std::string current_search_query;
     std::map<pid_t, long> last_cpu_times;
+    std::chrono::steady_clock::time_point last_refresh_time;
 
     // UI Callbacks
     static gboolean on_delete_event(GtkWidget* widget, GdkEvent* event, gpointer data);

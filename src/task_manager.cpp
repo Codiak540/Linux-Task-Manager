@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <chrono>
 #include <sys/resource.h>
+#include <unistd.h>
 
 TaskManager::TaskManager() : running(true), paused(false) {
+    last_refresh_time = std::chrono::steady_clock::now();
 }
 
 TaskManager::~TaskManager() {
@@ -254,15 +256,20 @@ void TaskManager::refresh_processes() {
     try {
         auto procs = ProcParser::get_all_processes();
 
+        auto now = std::chrono::steady_clock::now();
+        double time_diff_secs = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_refresh_time).count();
+        last_refresh_time = now;
+        long ticks_per_second = sysconf(_SC_CLK_TCK);
+
         // Calculate CPU usage and memory percentage
         SystemStats stats = ProcParser::get_system_stats();
         for (auto& proc : procs) {
-            // CPU calculation - scale it properly TODO: Fix this.
-            if (last_cpu_times.count(proc.pid)) {
+            // CPU calculation
+            if (last_cpu_times.count(proc.pid) && time_diff_secs > 0) {
                 long cpu_diff = proc.cpu_time - last_cpu_times[proc.pid];
-                // Jiffies to percentage: assume 100 jiffies per second per core
-                // For a rough estimate: (jiffies / 100) * (1 / num_cores)
-                proc.cpu_usage = std::max(0.0, cpu_diff / 10.0);  // Divide by 10 instead of 100
+                proc.cpu_usage = std::max(0.0, (double)cpu_diff * 100.0 / (double)ticks_per_second / time_diff_secs);
+            } else {
+                proc.cpu_usage = 0.0;
             }
             last_cpu_times[proc.pid] = proc.cpu_time;
 
