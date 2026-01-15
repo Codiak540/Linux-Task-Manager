@@ -36,7 +36,7 @@ void create_pid_file(const std::string& socket_path) {
     pf.close();
 }
 
-int main(int argc, char* argv[]) {
+int main() {
     // Setup IPC server for single instance
     IpcServer& ipc = IpcServer::get_instance();
     std::string socket_path = ipc.get_socket_path();
