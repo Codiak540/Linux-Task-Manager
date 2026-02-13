@@ -44,3 +44,12 @@ target_compile_options(taskmgr PRIVATE
 
 # Install target
 install(TARGETS taskmgr DESTINATION bin)
+
+# Install the desktop file to the standard location
+install(FILES taskmgr.desktop DESTINATION share/applications)
+
+# Install the icon to the hicolor theme
+# We rename it to 'taskmgr.png' to match the 'Icon=' line in the .desktop file
+install(FILES icon.png
+        DESTINATION share/icons/hicolor/scalable/apps
+        RENAME taskmgr.png)

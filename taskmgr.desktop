@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Linux Task Manager
+Comment=Manage processes and systemd services
+Exec=taskmgr
+Icon=taskmgr
+Terminal=false
+Categories=System;Monitor;GTK;
+Keywords=task;manager;process;systemd;
