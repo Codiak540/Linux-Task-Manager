@@ -1,6 +1,8 @@
 #include "task_manager.h"
 #include "debug.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <chrono>
 #include <sys/resource.h>
@@ -14,6 +16,8 @@ const char* headers3[] = {"Name", "Enabled", "Source", "Path"};
 
 TaskManager::TaskManager() : running(true), paused(false) {
     last_refresh_time = std::chrono::steady_clock::now();
+    last_network_time = std::chrono::steady_clock::now();
+    last_network_stats = get_network_stats();
 }
 
 TaskManager::~TaskManager() {
@@ -154,6 +158,11 @@ void TaskManager::setup_services_tab() {
     }
 
     gtk_container_add(GTK_CONTAINER(scrolled), services_tab.treeview);
+
+    // Add right-click menu support
+    g_signal_connect(services_tab.treeview, "button-press-event",
+                     G_CALLBACK(on_services_button_press), this);
+
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), scrolled, gtk_label_new("Services"));
 }
 
@@ -181,6 +190,11 @@ void TaskManager::setup_startup_tab() {
     }
 
     gtk_container_add(GTK_CONTAINER(scrolled), startup_tab.treeview);
+
+    // Add right-click menu support
+    g_signal_connect(startup_tab.treeview, "button-press-event",
+                     G_CALLBACK(on_startup_button_press), this);
+
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), scrolled, gtk_label_new("Startup"));
 }
 
@@ -278,13 +292,14 @@ void TaskManager::refresh_processes() {
         if (total_mem == 0) total_mem = 1; // Prevent division by zero
 
         for (auto& proc : new_procs) {
-            // CPU usage calculation: (cpu_time_delta / ticks_per_sec / time_delta) * 100 / num_cpus
+            // CPU usage calculation: (cpu_time_delta / ticks_per_sec / time_delta) * 100
+            // This gives total CPU usage across all cores (can exceed 100% on multi-core systems)
             if (last_cpu_times.count(proc.pid) && time_diff_secs > 0.001) {
                 long cpu_diff = proc.cpu_time - last_cpu_times[proc.pid];
                 if (cpu_diff > 0) {
-                    // Convert jiffies to seconds, then to percentage per core
-                    proc.cpu_usage = (static_cast<double>(cpu_diff) / static_cast<double>(ticks_per_second))
-                                   / time_diff_secs * 100.0 / static_cast<double>(num_cpus);
+                    // Convert jiffies to seconds, then to percentage
+                    double cpu_seconds = static_cast<double>(cpu_diff) / static_cast<double>(ticks_per_second);
+                    proc.cpu_usage = (cpu_seconds / time_diff_secs) * 100.0;
                 } else {
                     proc.cpu_usage = 0.0;
                 }
@@ -496,6 +511,26 @@ void TaskManager::refresh_performance() {
     uint64_t used_mem = stats.total_memory - stats.available_memory;
     perf_data.current_mem = (used_mem * 100.0) / stats.total_memory;
 
+    // Calculate network usage
+    auto now = std::chrono::steady_clock::now();
+    double time_diff = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_network_time).count();
+
+    if (time_diff > 0.1) {  // Only calculate if enough time has passed
+        NetworkStats current_net = get_network_stats();
+
+        uint64_t bytes_diff = (current_net.bytes_recv + current_net.bytes_sent) -
+                              (last_network_stats.bytes_recv + last_network_stats.bytes_sent);
+
+        // Convert to Mbps
+        perf_data.current_net = (bytes_diff * 8.0) / (time_diff * 1000000.0);
+
+        last_network_stats = current_net;
+        last_network_time = now;
+    }
+
+    // GPU is placeholder for now - could be expanded with nvidia-smi or similar
+    perf_data.current_gpu = 0.0;
+
     if (perf_data.cpu_history.size() >= perf_data.max_history) {
         perf_data.cpu_history.erase(perf_data.cpu_history.begin());
     }
@@ -505,6 +540,16 @@ void TaskManager::refresh_performance() {
         perf_data.mem_history.erase(perf_data.mem_history.begin());
     }
     perf_data.mem_history.push_back(perf_data.current_mem);
+
+    if (perf_data.net_history.size() >= perf_data.max_history) {
+        perf_data.net_history.erase(perf_data.net_history.begin());
+    }
+    perf_data.net_history.push_back(perf_data.current_net);
+
+    if (perf_data.gpu_history.size() >= perf_data.max_history) {
+        perf_data.gpu_history.erase(perf_data.gpu_history.begin());
+    }
+    perf_data.gpu_history.push_back(perf_data.current_gpu);
 
     gchar* cpu_text = g_strdup_printf("CPU: %.1f%%", perf_data.current_cpu);
     gtk_label_set_text(cpu_label, cpu_text);
@@ -660,4 +705,226 @@ void TaskManager::update_treeview(const TabState& tab) {
 void TaskManager::apply_search_filter(const std::string& query, const TabState& tab) {
     (void)query;
     (void)tab;
+}
+
+NetworkStats TaskManager::get_network_stats() {
+    NetworkStats stats;
+    stats.bytes_recv = 0;
+    stats.bytes_sent = 0;
+
+    std::ifstream net_dev("/proc/net/dev");
+    if (!net_dev) return stats;
+
+    std::string line;
+    // Skip first two header lines
+    std::getline(net_dev, line);
+    std::getline(net_dev, line);
+
+    while (std::getline(net_dev, line)) {
+        std::istringstream iss(line);
+        std::string interface;
+        iss >> interface;
+
+        // Skip loopback interface
+        if (interface.find("lo:") != std::string::npos) continue;
+
+        uint64_t bytes_recv, packets_recv, errs_recv, drop_recv, fifo_recv, frame_recv, compressed_recv, multicast_recv;
+        uint64_t bytes_sent, packets_sent, errs_sent, drop_sent, fifo_sent, colls_sent, carrier_sent, compressed_sent;
+
+        iss >> bytes_recv >> packets_recv >> errs_recv >> drop_recv >> fifo_recv >> frame_recv >> compressed_recv >> multicast_recv;
+        iss >> bytes_sent >> packets_sent >> errs_sent >> drop_sent >> fifo_sent >> colls_sent >> carrier_sent >> compressed_sent;
+
+        stats.bytes_recv += bytes_recv;
+        stats.bytes_sent += bytes_sent;
+    }
+
+    return stats;
+}
+
+gboolean TaskManager::on_services_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    if (event->type == GDK_BUTTON_PRESS && event->button == 3) {  // Right click
+        GtkTreeSelection* selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(widget));
+        GtkTreePath* path;
+
+        if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(widget),
+                                          static_cast<gint>(event->x),
+                                          static_cast<gint>(event->y),
+                                          &path, nullptr, nullptr, nullptr)) {
+            gtk_tree_selection_select_path(selection, path);
+            gtk_tree_path_free(path);
+
+            GtkWidget* menu = gtk_menu_new();
+
+            GtkWidget* start_item = gtk_menu_item_new_with_label("Start");
+            GtkWidget* stop_item = gtk_menu_item_new_with_label("Stop");
+            GtkWidget* restart_item = gtk_menu_item_new_with_label("Restart");
+
+            g_signal_connect(start_item, "activate", G_CALLBACK(on_service_start), self);
+            g_signal_connect(stop_item, "activate", G_CALLBACK(on_service_stop), self);
+            g_signal_connect(restart_item, "activate", G_CALLBACK(on_service_restart), self);
+
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), start_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), stop_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), restart_item);
+
+            gtk_widget_show_all(menu);
+            gtk_menu_popup_at_pointer(GTK_MENU(menu), reinterpret_cast<GdkEvent*>(event));
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+gboolean TaskManager::on_startup_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    if (event->type == GDK_BUTTON_PRESS && event->button == 3) {  // Right click
+        GtkTreeSelection* selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(widget));
+        GtkTreePath* path;
+
+        if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(widget),
+                                          static_cast<gint>(event->x),
+                                          static_cast<gint>(event->y),
+                                          &path, nullptr, nullptr, nullptr)) {
+            gtk_tree_selection_select_path(selection, path);
+            gtk_tree_path_free(path);
+
+            GtkWidget* menu = gtk_menu_new();
+
+            GtkWidget* enable_item = gtk_menu_item_new_with_label("Enable");
+            GtkWidget* disable_item = gtk_menu_item_new_with_label("Disable");
+
+            g_signal_connect(enable_item, "activate", G_CALLBACK(on_startup_enable), self);
+            g_signal_connect(disable_item, "activate", G_CALLBACK(on_startup_disable), self);
+
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), enable_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), disable_item);
+
+            gtk_widget_show_all(menu);
+            gtk_menu_popup_at_pointer(GTK_MENU(menu), reinterpret_cast<GdkEvent*>(event));
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+void TaskManager::on_service_start(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::start_service(name)) {
+                std::cout << "Started service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to start service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
+void TaskManager::on_service_stop(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::stop_service(name)) {
+                std::cout << "Stopped service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to stop service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
+void TaskManager::on_service_restart(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::restart_service(name)) {
+                std::cout << "Restarted service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to restart service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
+void TaskManager::on_startup_enable(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->startup_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* path = nullptr;
+        gtk_tree_model_get(model, &iter, 3, &path, -1);
+
+        if (path) {
+            if (SystemdManager::enable_startup(path)) {
+                std::cout << "Enabled startup entry: " << path << std::endl;
+            } else {
+                std::cerr << "Failed to enable startup entry: " << path << std::endl;
+            }
+            g_free(path);
+        }
+    }
+}
+
+void TaskManager::on_startup_disable(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->startup_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* path = nullptr;
+        gtk_tree_model_get(model, &iter, 3, &path, -1);
+
+        if (path) {
+            if (SystemdManager::disable_startup(path)) {
+                std::cout << "Disabled startup entry: " << path << std::endl;
+            } else {
+                std::cerr << "Failed to disable startup entry: " << path << std::endl;
+            }
+            g_free(path);
+        }
+    }
 }

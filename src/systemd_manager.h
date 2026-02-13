@@ -37,4 +37,3 @@ private:
     static std::string exec_command(const std::string& cmd);
     static bool parse_service_status(const std::string& output, ServiceInfo& info);
 };
-

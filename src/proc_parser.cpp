@@ -85,8 +85,9 @@ ProcessInfo ProcParser::parse_process(pid_t pid) {
     long utime, stime;
 
     iss >> state >> ppid;
-    // Skip ahead to utime and stime (fields 14 and 15, so skip 11 more fields)
-    for (int i = 0; i < 11; i++) {
+    // Skip ahead to utime and stime (fields 14 and 15)
+    // After state (field 3) and ppid (field 4), we need to skip fields 5-13 (9 fields)
+    for (int i = 0; i < 9; i++) {
         long dummy;
         iss >> dummy;
     }

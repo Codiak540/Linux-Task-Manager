@@ -33,6 +33,11 @@ struct PerformanceData {
     const size_t max_history = 60;
 };
 
+struct NetworkStats {
+    uint64_t bytes_recv = 0;
+    uint64_t bytes_sent = 0;
+};
+
 class TaskManager {
 public:
     TaskManager();
@@ -72,6 +77,10 @@ private:
     std::map<pid_t, long> last_cpu_times;
     std::chrono::steady_clock::time_point last_refresh_time;
 
+    // Network monitoring
+    NetworkStats last_network_stats;
+    std::chrono::steady_clock::time_point last_network_time;
+
     // UI Callbacks
     static gboolean on_delete_event(GtkWidget* widget, GdkEvent* event, gpointer data);
     static void on_end_process(GtkWidget* widget, gpointer data);
@@ -87,6 +96,15 @@ private:
     static gboolean on_net_draw(GtkWidget* widget, cairo_t* cr, gpointer data);
     static gboolean on_gpu_draw(GtkWidget* widget, cairo_t* cr, gpointer data);
 
+    // Right-click menu callbacks
+    static gboolean on_services_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data);
+    static gboolean on_startup_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data);
+    static void on_service_start(GtkWidget* widget, gpointer data);
+    static void on_service_stop(GtkWidget* widget, gpointer data);
+    static void on_service_restart(GtkWidget* widget, gpointer data);
+    static void on_startup_enable(GtkWidget* widget, gpointer data);
+    static void on_startup_disable(GtkWidget* widget, gpointer data);
+
     // Internal methods
     void setup_processes_tab();
     void setup_services_tab();
@@ -96,6 +114,9 @@ private:
     void refresh_services() const;
     void refresh_startup() const;
     void refresh_performance();
+
+    // Network monitoring helper
+    NetworkStats get_network_stats();
 
     // Helper methods for scroll preservation
     void save_scroll_position(GtkScrolledWindow* scrolled, double& v_pos, double& h_pos);
