@@ -8,32 +8,64 @@
 #include <unistd.h>
 #include <cstring>
 #include <algorithm>
+#include <sys/sysinfo.h>
+
+std::map<pid_t, ProcessInfo> ProcParser::last_processes;
+unsigned long long ProcParser::last_system_ticks = 0;
+
+unsigned long long get_total_ticks() {
+    std::ifstream stat_file("/proc/stat");
+    std::string line;
+    if (!std::getline(stat_file, line)) return 0;
+
+    std::istringstream iss(line);
+    std::string cpu;
+    unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
+    iss >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+    return user + nice + system + idle + iowait + irq + softirq + steal;
+}
 
 std::vector<ProcessInfo> ProcParser::get_all_processes() {
-    std::vector<ProcessInfo> processes;
+    std::vector<ProcessInfo> current_procs;
+    unsigned long long current_system_ticks = get_total_ticks();
+    unsigned long long system_delta = current_system_ticks - last_system_ticks;
+    int num_cores = get_nprocs(); // Get number of CPU cores
+
     DIR* dir = opendir("/proc");
-    if (!dir) return processes;
+    if (!dir) return current_procs;
 
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_type == DT_DIR && std::all_of(entry->d_name,
             entry->d_name + strlen(entry->d_name), ::isdigit)) {
-            pid_t pid = std::atoi(entry->d_name);
             try {
-                ProcessInfo info = parse_process(pid);
-                processes.push_back(info);
-            } catch (...) {
-                // Skip processes that disappear
-            }
+                current_procs.push_back(parse_process(std::atoi(entry->d_name)));
+            } catch (...) { continue; }
         }
     }
     closedir(dir);
 
-    // Sort by PID for consistency
-    std::sort(processes.begin(), processes.end(),
-        [](const ProcessInfo& a, const ProcessInfo& b) { return a.pid < b.pid; });
+    for (auto& proc : current_procs) {
+        if (last_processes.count(proc.pid) && system_delta > 0) {
+            long proc_delta = proc.cpu_time - last_processes[proc.pid].cpu_time;
 
-    return processes;
+            // Normalize by Cores: (proc_ticks / system_ticks) * 100
+            // This represents % of total system capacity
+            proc.cpu_usage = (static_cast<double>(proc_delta) / system_delta) * 100.0;
+
+            // Optional: If you want "Solaris mode" (where 1 core = 100%),
+            // multiply the result by num_cores.
+        } else {
+            proc.cpu_usage = 0.0;
+        }
+    }
+
+    // Update state for next tick
+    last_processes.clear();
+    for (const auto& p : current_procs) last_processes[p.pid] = p;
+    last_system_ticks = current_system_ticks;
+
+    return current_procs;
 }
 
 std::vector<ProcessInfo> ProcParser::get_user_processes() {

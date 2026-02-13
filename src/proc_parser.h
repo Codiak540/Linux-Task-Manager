@@ -49,6 +49,6 @@ private:
     double calculate_cpu_usage(const ProcessInfo& before, const ProcessInfo& after);
     static std::string get_exe_name(pid_t pid);
     static std::string get_user_name(uid_t uid);
-
-    std::map<pid_t, ProcessInfo> last_processes;
+    static unsigned long long last_system_ticks;
+    static std::map<pid_t, ProcessInfo> last_processes;
 };

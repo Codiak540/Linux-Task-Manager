@@ -74,8 +74,6 @@ private:
     ProcParser proc_parser;
     SystemdManager systemd_mgr;
     std::string current_search_query;
-    std::map<pid_t, long> last_cpu_times;
-    std::chrono::steady_clock::time_point last_refresh_time;
 
     // Network monitoring
     NetworkStats last_network_stats;

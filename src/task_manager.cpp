@@ -15,7 +15,6 @@ const char* headers2[] = {"Name", "Description", "State", "Active", "PID"};
 const char* headers3[] = {"Name", "Enabled", "Source", "Path"};
 
 TaskManager::TaskManager() : running(true), paused(false) {
-    last_refresh_time = std::chrono::steady_clock::now();
     last_network_time = std::chrono::steady_clock::now();
     last_network_stats = get_network_stats();
 }
@@ -275,40 +274,18 @@ gboolean TaskManager::refresh_data(gpointer data) {
 
 void TaskManager::refresh_processes() {
     try {
+        // ProcParser::get_all_processes() now handles CPU calculation internally
         auto new_procs = ProcParser::get_all_processes();
-
-        auto now = std::chrono::steady_clock::now();
-        double time_diff_secs = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_refresh_time).count();
-        last_refresh_time = now;
-
-        long ticks_per_second = sysconf(_SC_CLK_TCK);
-        int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-        if (num_cpus <= 0) num_cpus = 1;
 
         SystemStats stats = ProcParser::get_system_stats();
 
-        // FIXED: Use total_memory instead of available_memory for correct percentage
+        // Calculate memory percentage for each process
         uint64_t total_mem = stats.total_memory;
         if (total_mem == 0) total_mem = 1; // Prevent division by zero
 
         for (auto& proc : new_procs) {
-            // CPU usage calculation: (cpu_time_delta / ticks_per_sec / time_delta) * 100
-            // This gives total CPU usage across all cores (can exceed 100% on multi-core systems)
-            if (last_cpu_times.count(proc.pid) && time_diff_secs > 0.001) {
-                long cpu_diff = proc.cpu_time - last_cpu_times[proc.pid];
-                if (cpu_diff > 0) {
-                    // Convert jiffies to seconds, then to percentage
-                    double cpu_seconds = static_cast<double>(cpu_diff) / static_cast<double>(ticks_per_second);
-                    proc.cpu_usage = (cpu_seconds / time_diff_secs) * 100.0;
-                } else {
-                    proc.cpu_usage = 0.0;
-                }
-            } else {
-                proc.cpu_usage = 0.0;
-            }
-            last_cpu_times[proc.pid] = proc.cpu_time;
-
-            // FIXED: Correct memory percentage calculation
+            // CPU usage is already calculated by ProcParser
+            // Just calculate memory percentage here
             proc.memory_usage = (static_cast<double>(proc.memory_rss) / static_cast<double>(total_mem)) * 100.0;
         }
 
