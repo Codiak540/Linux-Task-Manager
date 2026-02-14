@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Version=1.0
+Version=2.0.0
 Name=Linux Task Manager
 Comment=Manage processes and systemd services
 Exec=taskmgr
