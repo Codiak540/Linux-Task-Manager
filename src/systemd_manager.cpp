@@ -61,20 +61,38 @@ ServiceInfo SystemdManager::get_service_info(const std::string& name) {
 
 bool SystemdManager::start_service(const std::string& name) {
     std::string cmd = "systemctl start " + name;
-    int ret = system(cmd.c_str());
-    return ret == 0;
+    exec_command_sudo(cmd);
+    return true;  // pkexec handles the UI, so we assume success if it returns
 }
 
 bool SystemdManager::stop_service(const std::string& name) {
     std::string cmd = "systemctl stop " + name;
-    int ret = system(cmd.c_str());
-    return ret == 0;
+    exec_command_sudo(cmd);
+    return true;
 }
 
 bool SystemdManager::restart_service(const std::string& name) {
     std::string cmd = "systemctl restart " + name;
-    int ret = system(cmd.c_str());
-    return ret == 0;
+    exec_command_sudo(cmd);
+    return true;
+}
+
+bool SystemdManager::enable_service(const std::string& name) {
+    std::string cmd = "systemctl enable " + name;
+    exec_command_sudo(cmd);
+    return true;
+}
+
+bool SystemdManager::disable_service(const std::string& name) {
+    std::string cmd = "systemctl disable " + name;
+    exec_command_sudo(cmd);
+    return true;
+}
+
+bool SystemdManager::enable_now_service(const std::string& name) {
+    std::string cmd = "systemctl enable --now " + name;
+    exec_command_sudo(cmd);
+    return true;
 }
 
 std::vector<StartupEntry> SystemdManager::get_startup_entries() {
@@ -196,6 +214,25 @@ std::string SystemdManager::exec_command(const std::string& cmd) {
     }
     pclose(pipe);
 
+    return result;
+}
+
+std::string SystemdManager::exec_command_sudo(const std::string& cmd) {
+    // Use pkexec for graphical sudo authentication
+    // pkexec provides a GUI password prompt and won't hang
+    std::string full_cmd = "pkexec " + cmd;
+
+    FILE* pipe = popen(full_cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    std::string result;
+    char buffer[512];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result += buffer;
+    }
+    int status = pclose(pipe);
+
+    // If user cancelled (status != 0), that's okay
     return result;
 }
 

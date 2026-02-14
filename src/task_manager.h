@@ -95,11 +95,26 @@ private:
     static gboolean on_gpu_draw(GtkWidget* widget, cairo_t* cr, gpointer data);
 
     // Right-click menu callbacks
+    static gboolean on_processes_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data);
     static gboolean on_services_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data);
     static gboolean on_startup_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data);
+
+    // Process menu callbacks
+    static void on_process_terminate(GtkWidget* widget, gpointer data);
+    static void on_process_kill(GtkWidget* widget, gpointer data);
+    static void on_process_suspend(GtkWidget* widget, gpointer data);
+    static void on_process_resume(GtkWidget* widget, gpointer data);
+    static void on_process_priority(GtkWidget* widget, gpointer data);
+
+    // Service menu callbacks
     static void on_service_start(GtkWidget* widget, gpointer data);
     static void on_service_stop(GtkWidget* widget, gpointer data);
     static void on_service_restart(GtkWidget* widget, gpointer data);
+    static void on_service_enable(GtkWidget* widget, gpointer data);
+    static void on_service_disable(GtkWidget* widget, gpointer data);
+    static void on_service_enable_now(GtkWidget* widget, gpointer data);
+
+    // Startup menu callbacks
     static void on_startup_enable(GtkWidget* widget, gpointer data);
     static void on_startup_disable(GtkWidget* widget, gpointer data);
 

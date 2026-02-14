@@ -120,13 +120,65 @@ void TaskManager::setup_processes_tab() {
     g_object_unref(processes_tab.store);
     g_object_unref(processes_tab.filter);
 
+    // Create sortable columns
     for (int i = 0; i < 8; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
             headers[i], renderer, "text", i, nullptr);
         gtk_tree_view_column_set_resizable(column, TRUE);
+        gtk_tree_view_column_set_sort_column_id(column, i);
+        gtk_tree_view_column_set_clickable(column, TRUE);
+
+        // Connect click signal for sorting
+        g_signal_connect(column, "clicked", G_CALLBACK(on_column_clicked), this);
+
         gtk_tree_view_append_column(GTK_TREE_VIEW(processes_tab.treeview), column);
     }
+
+    // Make store sortable
+    gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(processes_tab.store), 0,
+        [](GtkTreeModel* model, GtkTreeIter* a, GtkTreeIter* b, gpointer) -> gint {
+            gint pid_a, pid_b;
+            gtk_tree_model_get(model, a, 0, &pid_a, -1);
+            gtk_tree_model_get(model, b, 0, &pid_b, -1);
+            return (pid_a > pid_b) ? 1 : (pid_a < pid_b) ? -1 : 0;
+        }, nullptr, nullptr);
+
+    for (int i = 1; i < 8; i++) {
+        gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(processes_tab.store), i,
+            [](GtkTreeModel* model, GtkTreeIter* a, GtkTreeIter* b, gpointer user_data) -> gint {
+                int col = GPOINTER_TO_INT(user_data);
+
+                if (col == 1 || col == 6 || col == 7) {  // String columns: Name, User, State
+                    gchar *str_a, *str_b;
+                    gtk_tree_model_get(model, a, col, &str_a, -1);
+                    gtk_tree_model_get(model, b, col, &str_b, -1);
+                    int result = g_strcmp0(str_a, str_b);
+                    g_free(str_a);
+                    g_free(str_b);
+                    return result;
+                } else if (col == 2 || col == 3) {  // Double columns: CPU%, Mem%
+                    gdouble val_a, val_b;
+                    gtk_tree_model_get(model, a, col, &val_a, -1);
+                    gtk_tree_model_get(model, b, col, &val_b, -1);
+                    return (val_a > val_b) ? 1 : (val_a < val_b) ? -1 : 0;
+                } else if (col == 4) {  // UINT64: Memory MB
+                    guint64 val_a, val_b;
+                    gtk_tree_model_get(model, a, col, &val_a, -1);
+                    gtk_tree_model_get(model, b, col, &val_b, -1);
+                    return (val_a > val_b) ? 1 : (val_a < val_b) ? -1 : 0;
+                } else {  // Int columns: Threads
+                    gint val_a, val_b;
+                    gtk_tree_model_get(model, a, col, &val_a, -1);
+                    gtk_tree_model_get(model, b, col, &val_b, -1);
+                    return (val_a > val_b) ? 1 : (val_a < val_b) ? -1 : 0;
+                }
+            }, GINT_TO_POINTER(i), nullptr);
+    }
+
+    // Add right-click menu support
+    g_signal_connect(processes_tab.treeview, "button-press-event",
+                     G_CALLBACK(on_processes_button_press), this);
 
     gtk_container_add(GTK_CONTAINER(scrolled), processes_tab.treeview);
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), scrolled, gtk_label_new("Processes"));
@@ -148,12 +200,41 @@ void TaskManager::setup_services_tab() {
     services_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(services_tab.store));
     g_object_unref(services_tab.store);
 
+    // Create sortable columns
     for (int i = 0; i < 5; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
             headers2[i], renderer, "text", i, nullptr);
         gtk_tree_view_column_set_resizable(column, TRUE);
+        gtk_tree_view_column_set_sort_column_id(column, i);
+        gtk_tree_view_column_set_clickable(column, TRUE);
+
+        g_signal_connect(column, "clicked", G_CALLBACK(on_column_clicked), this);
+
         gtk_tree_view_append_column(GTK_TREE_VIEW(services_tab.treeview), column);
+    }
+
+    // Make store sortable
+    for (int i = 0; i < 5; i++) {
+        gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(services_tab.store), i,
+            [](GtkTreeModel* model, GtkTreeIter* a, GtkTreeIter* b, gpointer user_data) -> gint {
+                int col = GPOINTER_TO_INT(user_data);
+
+                if (col == 4) {  // PID column
+                    gint val_a, val_b;
+                    gtk_tree_model_get(model, a, col, &val_a, -1);
+                    gtk_tree_model_get(model, b, col, &val_b, -1);
+                    return (val_a > val_b) ? 1 : (val_a < val_b) ? -1 : 0;
+                } else {  // String columns
+                    gchar *str_a, *str_b;
+                    gtk_tree_model_get(model, a, col, &str_a, -1);
+                    gtk_tree_model_get(model, b, col, &str_b, -1);
+                    int result = g_strcmp0(str_a, str_b);
+                    g_free(str_a);
+                    g_free(str_b);
+                    return result;
+                }
+            }, GINT_TO_POINTER(i), nullptr);
     }
 
     gtk_container_add(GTK_CONTAINER(scrolled), services_tab.treeview);
@@ -180,12 +261,41 @@ void TaskManager::setup_startup_tab() {
     startup_tab.treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(startup_tab.store));
     g_object_unref(startup_tab.store);
 
+    // Create sortable columns
     for (int i = 0; i < 4; i++) {
         GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
         GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
             headers3[i], renderer, "text", i, nullptr);
         gtk_tree_view_column_set_resizable(column, TRUE);
+        gtk_tree_view_column_set_sort_column_id(column, i);
+        gtk_tree_view_column_set_clickable(column, TRUE);
+
+        g_signal_connect(column, "clicked", G_CALLBACK(on_column_clicked), this);
+
         gtk_tree_view_append_column(GTK_TREE_VIEW(startup_tab.treeview), column);
+    }
+
+    // Make store sortable
+    for (int i = 0; i < 4; i++) {
+        gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(startup_tab.store), i,
+            [](GtkTreeModel* model, GtkTreeIter* a, GtkTreeIter* b, gpointer user_data) -> gint {
+                int col = GPOINTER_TO_INT(user_data);
+
+                if (col == 1) {  // Enabled column (boolean)
+                    gboolean val_a, val_b;
+                    gtk_tree_model_get(model, a, col, &val_a, -1);
+                    gtk_tree_model_get(model, b, col, &val_b, -1);
+                    return (val_a > val_b) ? 1 : (val_a < val_b) ? -1 : 0;
+                } else {  // String columns
+                    gchar *str_a, *str_b;
+                    gtk_tree_model_get(model, a, col, &str_a, -1);
+                    gtk_tree_model_get(model, b, col, &str_b, -1);
+                    int result = g_strcmp0(str_a, str_b);
+                    g_free(str_a);
+                    g_free(str_b);
+                    return result;
+                }
+            }, GINT_TO_POINTER(i), nullptr);
     }
 
     gtk_container_add(GTK_CONTAINER(scrolled), startup_tab.treeview);
@@ -658,8 +768,35 @@ void TaskManager::on_priority_changed(GtkWidget*, gpointer data) {
     (void)data;
 }
 
-void TaskManager::on_column_clicked(GtkTreeViewColumn*, gpointer data) {
-    (void)data;
+void TaskManager::on_column_clicked(GtkTreeViewColumn* column, gpointer data) {
+    gint sort_column_id = gtk_tree_view_column_get_sort_column_id(column);
+    GtkTreeView* treeview = GTK_TREE_VIEW(gtk_tree_view_column_get_tree_view(column));
+    GtkTreeModel* model = gtk_tree_view_get_model(treeview);
+
+    // Get the actual store (handle filter if present)
+    GtkTreeModel* store = model;
+    if (GTK_IS_TREE_MODEL_FILTER(model)) {
+        store = gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(model));
+    }
+
+    if (!GTK_IS_TREE_SORTABLE(store)) return;
+
+    GtkSortType current_order;
+    gint current_column;
+
+    if (gtk_tree_sortable_get_sort_column_id(GTK_TREE_SORTABLE(store), &current_column, &current_order)) {
+        if (current_column == sort_column_id) {
+            // Toggle sort order
+            current_order = (current_order == GTK_SORT_ASCENDING) ? GTK_SORT_DESCENDING : GTK_SORT_ASCENDING;
+        } else {
+            // New column, default to descending for numeric columns, ascending for text
+            current_order = GTK_SORT_DESCENDING;
+        }
+    } else {
+        current_order = GTK_SORT_DESCENDING;
+    }
+
+    gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(store), sort_column_id, current_order);
 }
 
 void TaskManager::on_search_changed(GtkSearchEntry* entry, gpointer data) {
@@ -718,6 +855,80 @@ NetworkStats TaskManager::get_network_stats() {
     return stats;
 }
 
+gboolean TaskManager::on_processes_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    if (event->type == GDK_BUTTON_PRESS && event->button == 3) {  // Right click
+        GtkTreeSelection* selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(widget));
+        GtkTreePath* path;
+
+        if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(widget),
+                                          static_cast<gint>(event->x),
+                                          static_cast<gint>(event->y),
+                                          &path, nullptr, nullptr, nullptr)) {
+            gtk_tree_selection_select_path(selection, path);
+            gtk_tree_path_free(path);
+
+            GtkWidget* menu = gtk_menu_new();
+
+            GtkWidget* terminate_item = gtk_menu_item_new_with_label("Terminate");
+            GtkWidget* kill_item = gtk_menu_item_new_with_label("Kill");
+            GtkWidget* suspend_item = gtk_menu_item_new_with_label("Suspend");
+            GtkWidget* resume_item = gtk_menu_item_new_with_label("Resume");
+            GtkWidget* separator1 = gtk_separator_menu_item_new();
+
+            // Priority submenu
+            GtkWidget* priority_item = gtk_menu_item_new_with_label("Set Priority");
+            GtkWidget* priority_submenu = gtk_menu_new();
+
+            GtkWidget* realtime_item = gtk_menu_item_new_with_label("Realtime (-20)");
+            GtkWidget* high_item = gtk_menu_item_new_with_label("High (-10)");
+            GtkWidget* normal_item = gtk_menu_item_new_with_label("Normal (0)");
+            GtkWidget* low_item = gtk_menu_item_new_with_label("Low (10)");
+            GtkWidget* very_low_item = gtk_menu_item_new_with_label("Very Low (19)");
+
+            gtk_menu_shell_append(GTK_MENU_SHELL(priority_submenu), realtime_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(priority_submenu), high_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(priority_submenu), normal_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(priority_submenu), low_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(priority_submenu), very_low_item);
+
+            gtk_menu_item_set_submenu(GTK_MENU_ITEM(priority_item), priority_submenu);
+
+            g_signal_connect(terminate_item, "activate", G_CALLBACK(on_process_terminate), self);
+            g_signal_connect(kill_item, "activate", G_CALLBACK(on_process_kill), self);
+            g_signal_connect(suspend_item, "activate", G_CALLBACK(on_process_suspend), self);
+            g_signal_connect(resume_item, "activate", G_CALLBACK(on_process_resume), self);
+
+            g_object_set_data(G_OBJECT(realtime_item), "priority", GINT_TO_POINTER(-20));
+            g_object_set_data(G_OBJECT(high_item), "priority", GINT_TO_POINTER(-10));
+            g_object_set_data(G_OBJECT(normal_item), "priority", GINT_TO_POINTER(0));
+            g_object_set_data(G_OBJECT(low_item), "priority", GINT_TO_POINTER(10));
+            g_object_set_data(G_OBJECT(very_low_item), "priority", GINT_TO_POINTER(19));
+
+            g_signal_connect(realtime_item, "activate", G_CALLBACK(on_process_priority), self);
+            g_signal_connect(high_item, "activate", G_CALLBACK(on_process_priority), self);
+            g_signal_connect(normal_item, "activate", G_CALLBACK(on_process_priority), self);
+            g_signal_connect(low_item, "activate", G_CALLBACK(on_process_priority), self);
+            g_signal_connect(very_low_item, "activate", G_CALLBACK(on_process_priority), self);
+
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), terminate_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), kill_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), suspend_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), resume_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), separator1);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), priority_item);
+
+            gtk_widget_show_all(menu);
+            gtk_menu_popup_at_pointer(GTK_MENU(menu), reinterpret_cast<GdkEvent*>(event));
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 gboolean TaskManager::on_services_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
 
@@ -737,14 +948,25 @@ gboolean TaskManager::on_services_button_press(GtkWidget* widget, GdkEventButton
             GtkWidget* start_item = gtk_menu_item_new_with_label("Start");
             GtkWidget* stop_item = gtk_menu_item_new_with_label("Stop");
             GtkWidget* restart_item = gtk_menu_item_new_with_label("Restart");
+            GtkWidget* separator1 = gtk_separator_menu_item_new();
+            GtkWidget* enable_item = gtk_menu_item_new_with_label("Enable");
+            GtkWidget* disable_item = gtk_menu_item_new_with_label("Disable");
+            GtkWidget* enable_now_item = gtk_menu_item_new_with_label("Enable Now");
 
             g_signal_connect(start_item, "activate", G_CALLBACK(on_service_start), self);
             g_signal_connect(stop_item, "activate", G_CALLBACK(on_service_stop), self);
             g_signal_connect(restart_item, "activate", G_CALLBACK(on_service_restart), self);
+            g_signal_connect(enable_item, "activate", G_CALLBACK(on_service_enable), self);
+            g_signal_connect(disable_item, "activate", G_CALLBACK(on_service_disable), self);
+            g_signal_connect(enable_now_item, "activate", G_CALLBACK(on_service_enable_now), self);
 
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), start_item);
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), stop_item);
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), restart_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), separator1);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), enable_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), disable_item);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), enable_now_item);
 
             gtk_widget_show_all(menu);
             gtk_menu_popup_at_pointer(GTK_MENU(menu), reinterpret_cast<GdkEvent*>(event));
@@ -860,6 +1082,75 @@ void TaskManager::on_service_restart(GtkWidget*, gpointer data) {
     }
 }
 
+void TaskManager::on_service_enable(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::enable_service(name)) {
+                std::cout << "Enabled service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to enable service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
+void TaskManager::on_service_disable(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::disable_service(name)) {
+                std::cout << "Disabled service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to disable service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
+void TaskManager::on_service_enable_now(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->services_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar* name = nullptr;
+        gtk_tree_model_get(model, &iter, 0, &name, -1);
+
+        if (name) {
+            if (SystemdManager::enable_now_service(name)) {
+                std::cout << "Enabled and started service: " << name << std::endl;
+            } else {
+                std::cerr << "Failed to enable and start service: " << name << std::endl;
+            }
+            g_free(name);
+        }
+    }
+}
+
 void TaskManager::on_startup_enable(GtkWidget*, gpointer data) {
     auto* self = static_cast<TaskManager*>(data);
 
@@ -902,6 +1193,108 @@ void TaskManager::on_startup_disable(GtkWidget*, gpointer data) {
                 std::cerr << "Failed to disable startup entry: " << path << std::endl;
             }
             g_free(path);
+        }
+    }
+}
+
+void TaskManager::on_process_terminate(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->processes_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gint pid;
+        gtk_tree_model_get(model, &iter, 0, &pid, -1);
+
+        if (ProcParser::terminate_process(pid, false)) {
+            std::cout << "Terminated process " << pid << std::endl;
+        } else {
+            std::cerr << "Failed to terminate process " << pid << std::endl;
+        }
+    }
+}
+
+void TaskManager::on_process_kill(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->processes_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gint pid;
+        gtk_tree_model_get(model, &iter, 0, &pid, -1);
+
+        if (ProcParser::terminate_process(pid, true)) {
+            std::cout << "Killed process " << pid << std::endl;
+        } else {
+            std::cerr << "Failed to kill process " << pid << std::endl;
+        }
+    }
+}
+
+void TaskManager::on_process_suspend(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->processes_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gint pid;
+        gtk_tree_model_get(model, &iter, 0, &pid, -1);
+
+        if (ProcParser::suspend_process(pid)) {
+            std::cout << "Suspended process " << pid << std::endl;
+        } else {
+            std::cerr << "Failed to suspend process " << pid << std::endl;
+        }
+    }
+}
+
+void TaskManager::on_process_resume(GtkWidget*, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->processes_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gint pid;
+        gtk_tree_model_get(model, &iter, 0, &pid, -1);
+
+        if (ProcParser::resume_process(pid)) {
+            std::cout << "Resumed process " << pid << std::endl;
+        } else {
+            std::cerr << "Failed to resume process " << pid << std::endl;
+        }
+    }
+}
+
+void TaskManager::on_process_priority(GtkWidget* widget, gpointer data) {
+    auto* self = static_cast<TaskManager*>(data);
+
+    int priority = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "priority"));
+
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+        GTK_TREE_VIEW(self->processes_tab.treeview));
+    GtkTreeIter iter;
+    GtkTreeModel* model;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gint pid;
+        gtk_tree_model_get(model, &iter, 0, &pid, -1);
+
+        if (ProcParser::set_priority(pid, priority)) {
+            std::cout << "Set priority of process " << pid << " to " << priority << std::endl;
+        } else {
+            std::cerr << "Failed to set priority of process " << pid << std::endl;
         }
     }
 }

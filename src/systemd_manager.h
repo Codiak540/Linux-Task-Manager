@@ -28,6 +28,9 @@ public:
     static bool start_service(const std::string& name);
     static bool stop_service(const std::string& name);
     static bool restart_service(const std::string& name);
+    static bool enable_service(const std::string& name);
+    static bool disable_service(const std::string& name);
+    static bool enable_now_service(const std::string& name);
 
     static std::vector<StartupEntry> get_startup_entries();
     static bool enable_startup(const std::string& path);
@@ -35,5 +38,6 @@ public:
 
 private:
     static std::string exec_command(const std::string& cmd);
+    static std::string exec_command_sudo(const std::string& cmd);
     static bool parse_service_status(const std::string& output, ServiceInfo& info);
 };
